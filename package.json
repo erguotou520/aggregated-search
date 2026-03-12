@@ -12,11 +12,12 @@
     "searxng",
     "duckduckgo",
     "tavily",
-    "aggregated",
+    "serper",
+    "serp",
     "web-search",
     "openclaw-skill"
   ],
-  "author": "OpenClaw",
+  "author": "erguotou525@gmail.com",
   "license": "MIT",
   "engines": {
     "node": ">=22.9.0"

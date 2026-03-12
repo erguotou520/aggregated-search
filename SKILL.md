@@ -136,6 +136,11 @@ node $SKILL_DIR/scripts/search.mjs "搜索词" --timeout 15
 | **DuckDuckGo** | day/week/month/year | 无需 API Key，始终可用 |
 | **Ollama** | 无 | Ollama 云端 REST API，非本地推理 |
 
+## 探索结果优化
+
+- 搜索引擎有时候返回没有有效的结果，此时可尝试修改搜索关键词。
+- 如果搜索引擎返回的结果里的body内容比较少或者被截断，可实现本skill自带的 [Web Fetch](./SKILL.md#web-fetch)能力对url进行深度搜索
+
 ## 故障排除
 
 无结果时：
