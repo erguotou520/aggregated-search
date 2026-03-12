@@ -13,10 +13,17 @@ export const name = 'duckduckgo';
 
 export function isAvailable() { return true; }
 
-// region -> DDG kl 值; 只区分中国和美国，其余默认中国
+// region -> DDG kl 值; 常见地区映射，未知地区使用 wt-wt (全球)
+const KL_MAP = {
+  'zh-CN': 'cn-zh', 'zh-TW': 'tw-tzh',
+  'en-US': 'us-en', 'en-GB': 'uk-en',
+  'ja-JP': 'jp-jpn', 'ko-KR': 'kr-krn',
+  'de-DE': 'de-de', 'fr-FR': 'fr-fr',
+  'es-ES': 'es-es', 'ru-RU': 'ru-ru',
+};
+
 function toKL(region) {
-  if (region === 'en-US') return 'us-en';
-  return 'cn-zh'; // zh-CN 及其他均使用中国
+  return KL_MAP[region] || 'wt-wt';
 }
 
 // 时间范围 -> DDG df 值
@@ -42,14 +49,19 @@ function parseHTML(html) {
   //   行1: <td ...><a href="URL" class='result-link'>TITLE</a>...
   //   行2: <td class='result-extras'> (URL 显示行)
   //   行3: <td class='result-snippet'>SNIPPET</td>
-  // 用正则一次性匹配一个完整结果块（link 行 + 其后的 snippet 行）
-  const resultBlockRe = /<a[^>]+href="([^"]*)"[^>]+class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]+class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+  // 注意: href 和 class 属性顺序可能不同，先捕获整个属性字符串再提取 href
+  const resultBlockRe = /<a\b([^>]*\bclass=['"]result-link['"][^>]*)>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*\bclass=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
 
   for (const m of clean.matchAll(resultBlockRe)) {
-    let href = m[1];
+    const attrs = m[1];
     const rawTitle = m[2].replace(/<[^>]+>/g, '').trim();
     const title = decodeHTMLEntities(rawTitle);
     const body = decodeHTMLEntities(m[3].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+
+    // 从属性字符串中提取 href（兼容单双引号）
+    let href = '';
+    const hrefMatch = /\bhref="([^"]*)"|href='([^']*)'/i.exec(attrs);
+    if (hrefMatch) href = hrefMatch[1] ?? hrefMatch[2] ?? '';
 
     // De-proxy DDG redirect URLs -> extract uddg= param
     const uddgMatch = /[?&]uddg=([^&]+)/.exec(href);

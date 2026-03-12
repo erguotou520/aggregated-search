@@ -17,15 +17,19 @@
  *   node search.mjs "查询词" [选项]
  *
  * 选项:
- *   -n <数量>          结果数量 (默认 5, 最多 20)
- *   --source <引擎>    强制指定引擎: searxng|serper|tavily|bing|duckduckgo|ollama
- *   --region <地区>    地区/语言 (默认 zh-CN), 如 en-US、ja-JP
- *   --time <范围>      时间范围: day|week|month|year
- *   --topic <类型>     搜索类型: general(默认)|news
- *   --deep             深度搜索 (Tavily advanced 模式)
- *   --timeout <秒>     超时秒数 (默认 30)
- *   --verbose          打印使用的引擎等调试信息到 stderr
- *   --list             列出所有引擎及配置状态
+ *   -n <数量>            结果数量 (默认 5, 最多 20)
+ *   --source <引擎>      强制指定引擎: searxng|serper|tavily|bing|duckduckgo|ollama
+ *   --strategy <策略>    搜索策略: fallback(默认)|random|aggregate
+ *                         fallback  - 按优先级顺序降级, 第一个成功即返回
+ *                         random    - 随机打乱引擎顺序后降级
+ *                         aggregate - 所有引擎并行搜索, 结果去重合并
+ *   --region <地区>      地区/语言 (默认 zh-CN), 如 en-US、ja-JP
+ *   --time <范围>        时间范围: day|week|month|year
+ *   --topic <类型>       搜索类型: general(默认)|news
+ *   --deep               深度搜索 (Tavily advanced 模式)
+ *   --timeout <秒>       超时秒数 (默认 30)
+ *   --verbose            打印使用的引擎等调试信息到 stderr
+ *   --list               列出所有引擎及配置状态
  */
 
 import * as searxng    from './engines/searxng.mjs';
@@ -53,6 +57,7 @@ const args = process.argv.slice(2);
 function printUsage() {
   process.stderr.write(
     'Usage: node search.mjs "query" [-n 5] [--source ENGINE]\n' +
+    '       [--strategy fallback|random|aggregate]\n' +
     '       [--region zh-CN] [--time day|week|month|year]\n' +
     '       [--topic general|news] [--deep] [--timeout 30]\n' +
     '       [--verbose] [--list]\n'
@@ -74,26 +79,33 @@ if (args[0] === '--list') {
 const query = args[0];
 if (!query || query.startsWith('--')) printUsage();
 
-let count      = parseInt(process.env.SEARCH_RESULTS_LIMIT || '5', 10);
+let count      = 5;
 let source     = null;
-let region     = process.env.SEARCH_REGION || 'zh-CN';
+let strategy   = 'fallback';
+let region     = 'zh-CN';
 let time       = null;
 let topic      = 'general';
 let deep       = false;
-let timeoutSec = parseInt(process.env.SEARCH_TIMEOUT_SECONDS || '30', 10);
+let timeoutSec = 30;
 let verbose    = false;
 
 for (let i = 1; i < args.length; i++) {
   const a = args[i];
-  if      (a === '-n')        count      = parseInt(args[++i] || '5', 10);
-  else if (a === '--source')  source     = args[++i]?.toLowerCase();
-  else if (a === '--region')  region     = args[++i] || 'zh-CN';
-  else if (a === '--time')    time       = args[++i]?.toLowerCase() || null;
-  else if (a === '--topic')   topic      = args[++i]?.toLowerCase() || 'general';
-  else if (a === '--deep')    deep       = true;
-  else if (a === '--timeout') timeoutSec = parseInt(args[++i] || '30', 10);
-  else if (a === '--verbose') verbose    = true;
+  if      (a === '-n')          count      = parseInt(args[++i] || '5', 10);
+  else if (a === '--source')    source     = args[++i]?.toLowerCase();
+  else if (a === '--strategy')  strategy   = args[++i]?.toLowerCase() || 'fallback';
+  else if (a === '--region')    region     = args[++i] || 'zh-CN';
+  else if (a === '--time')      time       = args[++i]?.toLowerCase() || null;
+  else if (a === '--topic')     topic      = args[++i]?.toLowerCase() || 'general';
+  else if (a === '--deep')      deep       = true;
+  else if (a === '--timeout')   timeoutSec = parseInt(args[++i] || '30', 10);
+  else if (a === '--verbose')   verbose    = true;
   else { process.stderr.write('Unknown argument: ' + a + '\n'); printUsage(); }
+}
+
+if (!['fallback', 'random', 'aggregate'].includes(strategy)) {
+  process.stderr.write('Unknown strategy: ' + strategy + '. Use: fallback|random|aggregate\n');
+  process.exit(2);
 }
 
 count = Math.max(1, Math.min(count, 20));
@@ -128,13 +140,64 @@ if (source) {
 }
 
 log('chain: ' + chain.map(e => e.key).join(' -> '));
-log('options: count=' + count + ' region=' + region + ' time=' + time + ' topic=' + topic + ' deep=' + deep);
+log('options: count=' + count + ' region=' + region + ' time=' + time + ' topic=' + topic + ' deep=' + deep + ' strategy=' + strategy);
 
 // ─────────────────────────────
-// 执行搜索 (带自动降级)
+// 工具：随机打乱数组
+// ─────────────────────────────
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ─────────────────────────────
+// 执行搜索
 // ─────────────────────────────
 
 const opts = { query, count, region, time, topic, deep, timeout: timeoutMs };
+
+if (strategy === 'aggregate') {
+  // 所有引擎并行搜索，结果去重合并
+  log('aggregate: running ' + chain.length + ' engines in parallel...');
+  const settled = await Promise.allSettled(
+    chain.map(e => {
+      log('  starting ' + e.key + '...');
+      return e.mod.search(opts);
+    })
+  );
+  const seen = new Set();
+  const merged = [];
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i];
+    if (r.status === 'rejected') {
+      log(chain[i].key + ' failed: ' + r.reason?.message);
+      continue;
+    }
+    for (const item of r.value) {
+      if (!seen.has(item.url)) {
+        seen.add(item.url);
+        merged.push(item);
+      }
+    }
+  }
+  if (!merged.length) {
+    process.stderr.write('All search engines returned no results.\n');
+    if (!verbose) process.stderr.write('Run with --verbose to see details, or use --list to check engine configuration.\n');
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(merged.slice(0, count), null, 2) + '\n');
+  process.exit(0);
+}
+
+// fallback 或 random 策略
+if (strategy === 'random') {
+  chain = shuffle(chain);
+  log('random chain: ' + chain.map(e => e.key).join(' -> '));
+}
 
 let lastErr = null;
 for (const e of chain) {

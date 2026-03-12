@@ -37,11 +37,9 @@ node scripts/search.mjs "Node.js 教程"
 | `BING_API_KEY` | Bing | Azure 认知服务 Bing Web Search API v7 |
 | `BING_ENDPOINT` | Bing | 可选，默认 `https://api.bing.microsoft.com` |
 | `OLLAMA_API_KEY` | Ollama | [ollama.com/settings/keys](https://ollama.com/settings/keys) 获取 |
-| `SEARCH_REGION` | 全局 | 默认搜索地区，如 `zh-CN`（默认）或 `en-US` |
-| `SEARCH_RESULTS_LIMIT` | 全局 | 默认结果数量（默认 5） |
-| `SEARCH_TIMEOUT_SECONDS` | 全局 | 请求超时秒数（默认 30） |
 
 > **DuckDuckGo** 无需任何配置，始终可用，作为最终兜底引擎。
+> 区域/数量/超时等参数均通过 CLI 传入，无需设置环境变量。
 
 ## 使用方法
 
@@ -56,6 +54,19 @@ node scripts/search.mjs "搜索词" -n 10
 
 # 查看所有引擎及配置状态
 node scripts/search.mjs --list
+```
+
+### 搜索策略
+
+```bash
+# fallback（默认）：按优先级顺序尝试，第一个成功即返回
+node scripts/search.mjs "搜索词" --strategy fallback
+
+# random：随机化引擎顺序后依次降级（负载均衡）
+node scripts/search.mjs "搜索词" --strategy random
+
+# aggregate：所有引擎并行搜索，结果去重后合并返回
+node scripts/search.mjs "搜索词" --strategy aggregate
 ```
 
 ### 常用选项
@@ -94,6 +105,7 @@ node scripts/search.mjs "搜索词" --timeout 15
 |------|--------|------|
 | `-n <数量>` | 5 | 结果数量（最多 20） |
 | `--source <引擎>` | 自动降级 | 强制指定：`searxng`/`serper`/`tavily`/`bing`/`duckduckgo`/`ollama` |
+| `--strategy <策略>` | `fallback` | `fallback`（顺序降级）/`random`（随机顺序）/`aggregate`（并行聚合） |
 | `--region <代码>` | `zh-CN` | 地区代码 |
 | `--time <范围>` | 无 | `day`/`week`/`month`/`year` |
 | `--topic <类型>` | `general` | `general`/`news`/`images`/`videos` |
@@ -196,6 +208,20 @@ export async function search({ query, count = 5, region = 'zh-CN', time, topic =
 | Bing | 4 | 需要 API Key | 微软 Bing，中文友好 |
 | DuckDuckGo | 5 | **无需配置** | 隐私保护，HTML 解析，兜底 |
 | Ollama | 6 | 需要 API Key | Ollama 云端 REST API |
+
+## 引擎选型建议
+
+根据不同搜索场景的特点，以下是推荐策略：
+
+| 场景 | 推荐引擎/策略 | 说明 |
+|------|-------------|------|
+| 中文内容 | SearXNG (国内) / Bing | 对中文索引深，国内源更全 |
+| 全球英文内容 | Serper / Tavily | Google 质量，国际覆盖广 |
+| 新闻资讯 | Serper `--topic news` / Bing | 时效性强，收录快 |
+| AI/技术文档 | Tavily (`--deep`) | AI 优化，适合 RAG 场景 |
+| 无密钥兜底 | DuckDuckGo | 免配置，隐私友好 |
+| 最大覆盖率 | `--strategy aggregate` | 多引擎并行，适合重要查询 |
+| 负载均衡 | `--strategy random` | 随机分散请求，避免单引擎限流 |
 
 ## License
 

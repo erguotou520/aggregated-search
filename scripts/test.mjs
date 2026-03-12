@@ -206,11 +206,11 @@ describe('DuckDuckGo Lite', () => {
     assert.equal(body.get('kl'), 'cn-zh');
   });
 
-  test('search() unknown region falls back to cn-zh', async () => {
+  test('search() unknown region falls back to wt-wt (worldwide)', async () => {
     useMockFetch(DDG_HTML, 200);
-    await ddg.search({ query: 'q', region: 'fr-FR' });
+    await ddg.search({ query: 'q', region: 'pt-BR' });
     const body = new URLSearchParams(_lastFetch.opts.body);
-    assert.equal(body.get('kl'), 'cn-zh');
+    assert.equal(body.get('kl'), 'wt-wt');
   });
 
   test('search() time mapping: day→d, week→w, month→m, year→y', async () => {
