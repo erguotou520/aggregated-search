@@ -1,0 +1,31 @@
+{
+  "name": "aggregated-search",
+  "version": "1.0.0",
+  "description": "多源聚合搜索，支持 SearXNG / Serper / Tavily / Bing / DuckDuckGo / Ollama，自动降级，无额外依赖，适用于 AI Agent 工具调用",
+  "main": "scripts/search.mjs",
+  "scripts": {
+    "search": "node scripts/search.mjs",
+    "test": "node --test scripts/test.mjs"
+  },
+  "keywords": [
+    "search",
+    "searxng",
+    "duckduckgo",
+    "tavily",
+    "aggregated",
+    "web-search",
+    "openclaw-skill"
+  ],
+  "author": "OpenClaw",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "aggregated-search": "./scripts/search.mjs"
+  },
+  "openclaw": {
+    "skill": true,
+    "category": "search"
+  }
+}
