@@ -37,6 +37,7 @@ node scripts/search.mjs "Node.js 教程"
 | `BING_API_KEY` | Bing | Azure 认知服务 Bing Web Search API v7 |
 | `BING_ENDPOINT` | Bing | 可选，默认 `https://api.bing.microsoft.com` |
 | `OLLAMA_API_KEY` | Ollama | [ollama.com/settings/keys](https://ollama.com/settings/keys) 获取 |
+| `JINA_API_KEY` | 深度抓取 | [jina.ai](https://jina.ai/api-access) 获取，`--deep` 时抓取完整网页内容 |
 
 > **DuckDuckGo** 无需任何配置，始终可用，作为最终兜底引擎。
 > 区域/数量/超时等参数均通过 CLI 传入，无需设置环境变量。
@@ -109,7 +110,7 @@ node scripts/search.mjs "搜索词" --timeout 15
 | `--region <代码>` | `zh-CN` | 地区代码 |
 | `--time <范围>` | 无 | `day`/`week`/`month`/`year` |
 | `--topic <类型>` | `general` | `general`/`news`/`images`/`videos` |
-| `--deep` | false | 深度搜索 |
+| `--deep` | false | 深度搜索：Tavily 用 advanced 模式；其余引擎用 Jina Reader 抓取全文（需 `JINA_API_KEY`） |
 | `--verbose` | false | 输出调试信息到 stderr |
 | `--timeout <秒>` | 30 | 请求超时 |
 | `--list` | — | 列出引擎状态 |

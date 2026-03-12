@@ -26,7 +26,10 @@
  *   --region <地区>      地区/语言 (默认 zh-CN), 如 en-US、ja-JP
  *   --time <范围>        时间范围: day|week|month|year
  *   --topic <类型>       搜索类型: general(默认)|news
- *   --deep               深度搜索 (Tavily advanced 模式)
+ *   --deep               深度搜索:
+ *                         Tavily  - 使用 advanced 搜索模式 (内置)
+ *                         其余引擎 - 通过 Jina Reader 抓取完整网页内容替换 body (需 JINA_API_KEY)
+ *                         Ollama  - 不支持
  *   --timeout <秒>       超时秒数 (默认 30)
  *   --verbose            打印使用的引擎等调试信息到 stderr
  *   --list               列出所有引擎及配置状态
@@ -47,6 +50,79 @@ const ENGINES = [
   { key: 'duckduckgo', mod: duckduckgo },
   { key: 'ollama',     mod: ollama     },
 ];
+
+// ─────────────────────────────
+// Jina Reader 深度抓取
+// 引擎: https://r.jina.ai/<url>  (需要 JINA_API_KEY)
+// 适用于 searxng / serper / bing / duckduckgo 的 --deep 模式
+// Tavily 用自身 advanced 模式，Ollama 不支持深度
+// ─────────────────────────────
+
+const JINA_API_KEY = (process.env.JINA_API_KEY || '').trim();
+
+// 只对有意义路径的 URL 做深度抓取（跳过主域名 URL）
+function isDeepFetchable(url) {
+  try {
+    const { pathname } = new URL(url);
+    return pathname.length > 1 && pathname !== '/';
+  } catch { return false; }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function jinaFetch(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const resp = await fetch('https://r.jina.ai/' + url, {
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer ' + JINA_API_KEY,
+        'X-Retain-Images': 'none',
+      },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!resp.ok) throw new Error('Jina HTTP ' + resp.status);
+    const json = await resp.json();
+    return json?.data?.content || null;
+  } catch (e) { clearTimeout(t); throw e; }
+}
+
+// 对结果列表进行 Jina 深度内容替换（并发 5，失败后等 5s 重试一次）
+// 跳过 source=tavily/ollama 的条目（tavily 自带 deep，ollama 不支持）
+async function jinaEnrich(results, logFn) {
+  if (!JINA_API_KEY) {
+    logFn?.('deep: JINA_API_KEY not set, skipping enrichment');
+    return results;
+  }
+  const enriched = results.map(r => ({ ...r }));
+  const SKIP_SOURCES = new Set(['tavily', 'ollama']);
+  const candidates = enriched
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => !SKIP_SOURCES.has(r.source) && isDeepFetchable(r.url));
+  logFn?.('deep: enriching ' + candidates.length + '/' + enriched.length + ' URL(s) via Jina...');
+  for (let b = 0; b < candidates.length; b += 5) {
+    await Promise.all(candidates.slice(b, b + 5).map(async ({ r, i }) => {
+      try {
+        const content = await jinaFetch(r.url);
+        if (content) enriched[i].body = content;
+        logFn?.('  ✓ ' + r.url);
+      } catch {
+        logFn?.('  ✗ retry in 5s: ' + r.url);
+        await sleep(5000);
+        try {
+          const content = await jinaFetch(r.url);
+          if (content) enriched[i].body = content;
+          logFn?.('  ✓ (retry) ' + r.url);
+        } catch (e2) {
+          logFn?.('  ✗ failed: ' + r.url + ' – ' + e2.message);
+        }
+      }
+    }));
+  }
+  return enriched;
+}
 
 // ─────────────────────────────
 // 参数解析
@@ -189,7 +265,9 @@ if (strategy === 'aggregate') {
     if (!verbose) process.stderr.write('Run with --verbose to see details, or use --list to check engine configuration.\n');
     process.exit(1);
   }
-  process.stdout.write(JSON.stringify(merged.slice(0, count), null, 2) + '\n');
+  // aggregate 返回所有去重结果，不按 -n 截断
+  const output = deep ? await jinaEnrich(merged, log) : merged;
+  process.stdout.write(JSON.stringify(output, null, 2) + '\n');
   process.exit(0);
 }
 
@@ -200,10 +278,16 @@ if (strategy === 'random') {
 }
 
 let lastErr = null;
+// tavily 在引擎内部处理 deep，其余可用引擎用 Jina enrichment
+const JINA_SKIP = new Set(['tavily', 'ollama']);
+
 for (const e of chain) {
   log('trying ' + e.key + '...');
   try {
-    const results = await e.mod.search(opts);
+    let results = await e.mod.search(opts);
+    if (deep && !JINA_SKIP.has(e.key)) {
+      results = await jinaEnrich(results, log);
+    }
     process.stdout.write(JSON.stringify(results, null, 2) + '\n');
     process.exit(0);
   } catch (err) {

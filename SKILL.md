@@ -22,6 +22,7 @@ metadata: {"clawdbot":{"emoji":"🔍","requires":{"bins":["node"],"env":["SEARXN
 | `TAVILY_API_KEY` | Tavily API Key | 可选 |
 | `BING_API_KEY` | Bing Web Search API Key | 可选 |
 | `OLLAMA_API_KEY` | Ollama 云端搜索 API Key (ollama.com/settings/keys) | 可选 |
+| `JINA_API_KEY` | Jina Reader API Key，`--deep` 时抓取完整网页内容（jina.ai/api-access） | 可选 |
 
 ## 搜索策略
 
