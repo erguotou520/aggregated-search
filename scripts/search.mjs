@@ -102,18 +102,58 @@ async function jinaEnrich(results, logFn) {
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => !SKIP_SOURCES.has(r.source) && isDeepFetchable(r.url));
   logFn?.('deep: enriching ' + candidates.length + '/' + enriched.length + ' URL(s) via Jina...');
+  // 内部辅助：将长文本按句切分并截取至 maxChars
+  function summarizeText(text, maxChars) {
+    if (!text) return '';
+    text = text.trim();
+    if (text.length <= maxChars) return text;
+    // 尝试按句子边界截取（中英文标点）
+    const parts = text.split(/(?<=[。！？.!?])\s*/);
+    let out = '';
+    for (const p of parts) {
+      if ((out + p).length > maxChars) break;
+      out += p;
+    }
+    if (!out) out = text.slice(0, maxChars);
+    if (out.length < text.length) out = out.replace(/\s+$/,'') + ' ...';
+    return out;
+  }
+
   for (let b = 0; b < candidates.length; b += 5) {
     await Promise.all(candidates.slice(b, b + 5).map(async ({ r, i }) => {
       try {
         const content = await jinaFetch(r.url);
-        if (content) enriched[i].body = content;
+        if (content) {
+          // 根据 deepMode 决定 body 内容
+          if (deepMode === 'full') {
+            enriched[i].body = content;
+            enriched[i].full_body = content;
+          } else if (deepMode === 'trim') {
+            enriched[i].body = content.slice(0, deepMaxChars) + (content.length > deepMaxChars ? ' ...' : '');
+            enriched[i].full_body = content;
+          } else { // summary
+            enriched[i].body = summarizeText(content, deepMaxChars);
+            enriched[i].full_body = content;
+          }
+        }
         logFn?.('  ✓ ' + r.url);
       } catch {
         logFn?.('  ✗ retry in 5s: ' + r.url);
         await sleep(5000);
         try {
           const content = await jinaFetch(r.url);
-          if (content) enriched[i].body = content;
+          if (content) {
+            if (deepMode === 'full') {
+              enriched[i].body = content;
+              enriched[i].full_body = content;
+            } else if (deepMode === 'trim') {
+              enriched[i].body = content.slice(0, deepMaxChars) + (content.length > deepMaxChars ? ' ...' : '');
+              enriched[i].full_body = content;
+            } else {
+              enriched[i].body = summarizeText(content, deepMaxChars);
+              enriched[i].full_body = content;
+            }
+          }
           logFn?.('  ✓ (retry) ' + r.url);
         } catch (e2) {
           logFn?.('  ✗ failed: ' + r.url + ' – ' + e2.message);
@@ -162,6 +202,8 @@ let region     = 'zh-CN';
 let time       = null;
 let topic      = 'general';
 let deep       = false;
+let deepMode   = 'summary';
+let deepMaxChars = 800;
 let timeoutSec = 30;
 let verbose    = false;
 
@@ -174,6 +216,8 @@ for (let i = 1; i < args.length; i++) {
   else if (a === '--time')      time       = args[++i]?.toLowerCase() || null;
   else if (a === '--topic')     topic      = args[++i]?.toLowerCase() || 'general';
   else if (a === '--deep')      deep       = true;
+  else if (a === '--deep-mode') deepMode   = args[++i]?.toLowerCase() || 'summary';
+  else if (a === '--deep-max-chars') deepMaxChars = parseInt(args[++i] || '800', 10);
   else if (a === '--timeout')   timeoutSec = parseInt(args[++i] || '30', 10);
   else if (a === '--verbose')   verbose    = true;
   else { process.stderr.write('Unknown argument: ' + a + '\n'); printUsage(); }
@@ -181,6 +225,11 @@ for (let i = 1; i < args.length; i++) {
 
 if (!['fallback', 'random', 'aggregate'].includes(strategy)) {
   process.stderr.write('Unknown strategy: ' + strategy + '. Use: fallback|random|aggregate\n');
+  process.exit(2);
+}
+
+if (!['summary', 'full', 'trim'].includes(deepMode)) {
+  process.stderr.write('Unknown --deep-mode: ' + deepMode + '. Use: summary|full|trim\n');
   process.exit(2);
 }
 
